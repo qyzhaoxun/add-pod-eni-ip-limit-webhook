@@ -17,19 +17,20 @@ import (
 )
 
 const (
-	//[{"op": "add", "path": "/spec/containers/0/resources", "value": {"requests":{"tke.cloud.tencent.com/underlay-ip-count":1},"limits":{"tke.cloud.tencent.com/underlay-ip-count":1}}}]
 	addUnderlayIPRequestPatch string = `
 [
   {
     "op": "add",
-    "path": "/spec/containers/0/resources",
+    "path": "/spec/containers/0/resources/requests",
     "value": {
-      "requests": {
-        "tke.cloud.tencent.com/underlay-ip-count": 1
-      },
-      "limits": {
-        "tke.cloud.tencent.com/underlay-ip-count": 1
-      }
+      "tke.cloud.tencent.com/underlay-ip-count": 1
+    }
+  },
+  {
+    "op": "add",
+    "path": "/spec/containers/0/resources/limits",
+    "value": {
+      "tke.cloud.tencent.com/underlay-ip-count": 1
     }
   }
 ]
@@ -37,7 +38,7 @@ const (
 	StaticIPConfigAnnotation = "tke.cloud.tencent.com/enable-static-ip"
 	StaticIPListAnnotation   = "tke.cloud.tencent.com/static-ip-list"
 	CNINetworksAnnotation    = "tke.cloud.tencent.com/networks"
-	TkeEniCNI                = "tke-eni-eni"
+	TkeEniCNI                = "tke-eni-cni"
 )
 
 // Config contains the server (the webhook) cert and key.
@@ -138,7 +139,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitFunc) {
 		return
 	}
 
-	glog.V(2).Info(fmt.Sprintf("handling request: %v", body))
+	glog.V(2).Info(fmt.Sprintf("handling request: %s", string(body)))
 	var reviewResponse *v1beta1.AdmissionResponse
 	ar := v1beta1.AdmissionReview{}
 	deserializer := codecs.UniversalDeserializer()
