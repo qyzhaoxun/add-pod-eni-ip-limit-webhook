@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: Secret
 metadata:
-  name: webhook-certs-secret
+  name: tke-eni-webhook-certs-secret
   namespace: kube-system
 type: Opaque
 data:
@@ -38,7 +38,7 @@ spec:
       volumes:
       - name: webhook-certs
         secret:
-          secretName: webhook-certs-secret
+          secretName: tke-eni-webhook-certs-secret
 ---
 apiVersion: v1
 kind: Service

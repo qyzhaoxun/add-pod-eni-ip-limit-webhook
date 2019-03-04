@@ -10,8 +10,7 @@ BIN_PATH ?= ./bin/$(BINARY)
 REGISTRY ?= ccr.ccs.tencentyun.com/tke-cni
 IMAGE ?= $(REGISTRY)/$(BINARY)
 
-#VERSION ?= $(shell git describe --tags --always --dirty)
-VERSION ?= v0.0.1
+VERSION ?= $(shell git describe --tags --always --dirty)
 LDFLAGS ?= -X main.version=$(VERSION)
 
 # Default to build the Linux binary
