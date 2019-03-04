@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/golang/glog"
@@ -17,28 +18,14 @@ import (
 )
 
 const (
-	addUnderlayIPRequestPatch string = `
-[
-  {
-    "op": "add",
-    "path": "/spec/containers/0/resources/requests",
-    "value": {
-      "tke.cloud.tencent.com/underlay-ip-count": 1
-    }
-  },
-  {
-    "op": "add",
-    "path": "/spec/containers/0/resources/limits",
-    "value": {
-      "tke.cloud.tencent.com/underlay-ip-count": 1
-    }
-  }
-]
-`
 	StaticIPConfigAnnotation = "tke.cloud.tencent.com/enable-static-ip"
 	StaticIPListAnnotation   = "tke.cloud.tencent.com/static-ip-list"
 	CNINetworksAnnotation    = "tke.cloud.tencent.com/networks"
 	TkeEniCNI                = "tke-eni-cni"
+
+	PatchOPType               = "add"
+	UnderlayIPRequestJsonPath = "/spec/containers/0/resources/requests/tke.cloud.tencent.com~1underlay-ip-count"
+	UnderlayIPLimitJsonPath   = "/spec/containers/0/resources/limits/tke.cloud.tencent.com~1underlay-ip-count"
 )
 
 // Config contains the server (the webhook) cert and key.
@@ -63,6 +50,12 @@ func toAdmissionResponse(err error) *v1beta1.AdmissionResponse {
 	}
 }
 
+type ThingSpec struct {
+	Op    string `json:"op"`
+	Path  string `json:"path"`
+	Value string `json:"value"`
+}
+
 // mutate pods using tke-eni-cni.
 func mutatePods(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 	glog.V(2).Info("mutating pods")
@@ -83,7 +76,22 @@ func mutatePods(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 	reviewResponse.Allowed = true
 	networks, ok := pod.Annotations[CNINetworksAnnotation]
 	if ok && strings.Contains(networks, TkeEniCNI) {
-		reviewResponse.Patch = []byte(addUnderlayIPRequestPatch)
+		things := make([]ThingSpec, 2)
+		things[0].Op = PatchOPType
+		things[0].Path = UnderlayIPRequestJsonPath
+		things[0].Value = "1"
+
+		things[1].Op = PatchOPType
+		things[1].Path = UnderlayIPLimitJsonPath
+		things[1].Value = "1"
+
+		patchBytes, err := json.Marshal(things)
+		if err != nil {
+			glog.Error(err)
+			return toAdmissionResponse(err)
+		}
+
+		reviewResponse.Patch = patchBytes
 		pt := v1beta1.PatchTypeJSONPatch
 		reviewResponse.PatchType = &pt
 	}
@@ -149,8 +157,8 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitFunc) {
 	} else {
 		reviewResponse = admit(ar)
 	}
-	glog.V(2).Info(fmt.Sprintf("sending response: %v", reviewResponse))
 
+	glog.V(2).Info(fmt.Sprintf("sending response: %s", formatResponse(reviewResponse)))
 	response := v1beta1.AdmissionReview{}
 	if reviewResponse != nil {
 		response.Response = reviewResponse
@@ -164,9 +172,44 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitFunc) {
 	if err != nil {
 		glog.Error(err)
 	}
+
 	if _, err := w.Write(resp); err != nil {
 		glog.Error(err)
 	}
+}
+
+func valueToStringGenerated(v interface{}) string {
+	rv := reflect.ValueOf(v)
+	if rv.IsNil() {
+		return "nil"
+	}
+	pv := reflect.Indirect(rv).Interface()
+	return fmt.Sprintf("*%v", pv)
+}
+
+func formatResponse(this *v1beta1.AdmissionResponse) string {
+	if this == nil {
+		return "nil"
+	}
+	keysForAuditAnnotations := make([]string, 0, len(this.AuditAnnotations))
+	for k := range this.AuditAnnotations {
+		keysForAuditAnnotations = append(keysForAuditAnnotations, k)
+	}
+	mapStringForAuditAnnotations := "map[string]string{"
+	for _, k := range keysForAuditAnnotations {
+		mapStringForAuditAnnotations += fmt.Sprintf("%v: %v,", k, this.AuditAnnotations[k])
+	}
+	mapStringForAuditAnnotations += "}"
+	s := strings.Join([]string{`&AdmissionResponse{`,
+		`UID:` + fmt.Sprintf("%v", this.UID) + `,`,
+		`Allowed:` + fmt.Sprintf("%v", this.Allowed) + `,`,
+		`Result:` + strings.Replace(fmt.Sprintf("%v", this.Result), "Status", "k8s_io_apimachinery_pkg_apis_meta_v1.Status", 1) + `,`,
+		`Patch:` + string(this.Patch) + `,`,
+		`PatchType:` + valueToStringGenerated(this.PatchType) + `,`,
+		`AuditAnnotations:` + mapStringForAuditAnnotations + `,`,
+		`}`,
+	}, "")
+	return s
 }
 
 func serveMutatePods(w http.ResponseWriter, r *http.Request) {
