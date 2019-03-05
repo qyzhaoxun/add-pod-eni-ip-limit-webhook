@@ -13,6 +13,7 @@ import (
 	"k8s.io/api/admission/v1beta1"
 	appsv1 "k8s.io/api/apps/v1beta2"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
@@ -23,9 +24,9 @@ const (
 	CNINetworksAnnotation    = "tke.cloud.tencent.com/networks"
 	TkeEniCNI                = "tke-eni-cni"
 
-	PatchOPType               = "add"
-	UnderlayIPRequestJsonPath = "/spec/containers/0/resources/requests/tke.cloud.tencent.com~1underlay-ip-count"
-	UnderlayIPLimitJsonPath   = "/spec/containers/0/resources/limits/tke.cloud.tencent.com~1underlay-ip-count"
+	PatchOPType        = "replace"
+	UnderlayIPJsonPath = "/spec/containers/0/resources"
+	UnderlayIPResource = "tke.cloud.tencent.com/underlay-ip-count"
 )
 
 // Config contains the server (the webhook) cert and key.
@@ -51,9 +52,9 @@ func toAdmissionResponse(err error) *v1beta1.AdmissionResponse {
 }
 
 type ThingSpec struct {
-	Op    string `json:"op"`
-	Path  string `json:"path"`
-	Value string `json:"value"`
+	Op    string          `json:"op"`
+	Path  string          `json:"path"`
+	Value json.RawMessage `json:"value"`
 }
 
 // mutate pods using tke-eni-cni.
@@ -76,15 +77,25 @@ func mutatePods(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 	reviewResponse.Allowed = true
 	networks, ok := pod.Annotations[CNINetworksAnnotation]
 	if ok && strings.Contains(networks, TkeEniCNI) {
-		things := make([]ThingSpec, 2)
+		res := pod.Spec.Containers[0].Resources
+		if res.Requests == nil {
+			res.Requests = make(corev1.ResourceList)
+		}
+		res.Requests[UnderlayIPResource] = *resource.NewQuantity(1, resource.DecimalSI)
+		if res.Limits == nil {
+			res.Limits = make(corev1.ResourceList)
+		}
+		res.Limits[UnderlayIPResource] = *resource.NewQuantity(1, resource.DecimalSI)
+		replaceBytes, err := json.Marshal(res)
+		if err != nil {
+			glog.Error(err)
+			return toAdmissionResponse(err)
+		}
+
+		things := make([]ThingSpec, 1)
 		things[0].Op = PatchOPType
-		things[0].Path = UnderlayIPRequestJsonPath
-		things[0].Value = "1"
-
-		things[1].Op = PatchOPType
-		things[1].Path = UnderlayIPLimitJsonPath
-		things[1].Value = "1"
-
+		things[0].Path = UnderlayIPJsonPath
+		things[0].Value = replaceBytes
 		patchBytes, err := json.Marshal(things)
 		if err != nil {
 			glog.Error(err)
