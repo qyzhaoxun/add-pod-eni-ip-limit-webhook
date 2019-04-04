@@ -22,11 +22,11 @@ const (
 	StaticIPConfigAnnotation = "tke.cloud.tencent.com/enable-static-ip"
 	StaticIPListAnnotation   = "tke.cloud.tencent.com/static-ip-list"
 	CNINetworksAnnotation    = "tke.cloud.tencent.com/networks"
-	TkeEniCNI                = "tke-eni-cni"
+	TkeEniCNI                = "tke-route-eni"
 
 	PatchOPType        = "replace"
 	UnderlayIPJsonPath = "/spec/containers/0/resources"
-	UnderlayIPResource = "tke.cloud.tencent.com/underlay-ip-count"
+	UnderlayIPResource = "tke.cloud.tencent.com/eni-ip"
 )
 
 // Config contains the server (the webhook) cert and key.
