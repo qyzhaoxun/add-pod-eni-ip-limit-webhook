@@ -1,13 +1,13 @@
 .PHONY: build docker-build docker push clean
 
-PKG := github.com/qyzhaoxun/tke-eni-webhook-admission-controller
+PKG := github.com/qyzhaoxun/add-pod-eni-ip-limit-webhook
 
-BINARY ?= tke-eni-webhook-admission-controller
+BINARY ?= add-pod-eni-ip-limit-webhook
 
 CONTAINER_BUILD_PATH ?= /go/src/$(PKG)
 BIN_PATH ?= ./bin/$(BINARY)
 
-REGISTRY ?= ccr.ccs.tencentyun.com/tke-cni
+REGISTRY ?= ccr.ccs.tencentyun.com/tkeimages
 IMAGE ?= $(REGISTRY)/$(BINARY)
 
 VERSION ?= $(shell git describe --tags --always --dirty)

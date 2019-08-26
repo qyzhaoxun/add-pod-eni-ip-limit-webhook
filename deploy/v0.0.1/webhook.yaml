@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: Secret
 metadata:
-  name: tke-eni-webhook-certs-secret
+  name: eni-ip-webhook-certs
   namespace: kube-system
 type: Opaque
 data:
@@ -12,25 +12,25 @@ data:
 kind: Deployment
 apiVersion: extensions/v1beta1
 metadata:
-  name: tke-eni-webhook-admission-controller
+  name: add-pod-eni-ip-limit-webhook
   namespace: kube-system
   labels:
-    k8s-app: tke-eni-webhook-admission-controller
+    k8s-app: add-pod-eni-ip-limit-webhook
 spec:
   replicas: 1
   selector:
     matchLabels:
-      k8s-app: tke-eni-webhook-admission-controller
+      k8s-app: add-pod-eni-ip-limit-webhook
   template:
     metadata:
       labels:
-        k8s-app: tke-eni-webhook-admission-controller
+        k8s-app: add-pod-eni-ip-limit-webhook
     spec:
       containers:
-      - image: ccr.ccs.tencentyun.com/tke-cni/tke-eni-webhook-admission-controller:v0.0.1
+      - image: ccr.ccs.tencentyun.com/tkeimages/add-pod-eni-ip-limit-webhook:v0.0.1
         args: ["--tls-cert-file=/webhook.local.config/certificates/tls.crt", "--tls-private-key-file=/webhook.local.config/certificates/tls.key", "--alsologtostderr", "-v=4", "2>&1"]
         imagePullPolicy: Always
-        name: tke-eni-webhook-admission-controller
+        name: add-pod-eni-ip-limit-webhook
         volumeMounts:
         - mountPath: /webhook.local.config/certificates
           name: webhook-certs
@@ -38,17 +38,17 @@ spec:
       volumes:
       - name: webhook-certs
         secret:
-          secretName: tke-eni-webhook-certs-secret
+          secretName: eni-ip-webhook-certs
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: tke-eni-webhook-admission-controller
+  name: add-pod-eni-ip-limit-webhook
   namespace: kube-system
 spec:
   type: ClusterIP
   selector:
-    k8s-app: tke-eni-webhook-admission-controller
+    k8s-app: add-pod-eni-ip-limit-webhook
   ports:
   - port: 443
     targetPort: 443
