@@ -11,7 +11,6 @@ import (
 
 	"github.com/golang/glog"
 	"k8s.io/api/admission/v1beta1"
-	appsv1 "k8s.io/api/apps/v1beta2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -19,20 +18,24 @@ import (
 )
 
 const (
-	StaticIPConfigAnnotation = "tke.cloud.tencent.com/enable-static-ip"
-	StaticIPListAnnotation   = "tke.cloud.tencent.com/static-ip-list"
-	CNINetworksAnnotation    = "tke.cloud.tencent.com/networks"
-	TkeEniCNI                = "tke-route-eni"
+	CNINetworksAnnotation = "tke.cloud.tencent.com/networks"
+	TKERouteENI           = "tke-route-eni"
 
 	PatchOPType        = "replace"
 	UnderlayIPJsonPath = "/spec/containers/0/resources"
 	UnderlayIPResource = "tke.cloud.tencent.com/eni-ip"
 )
 
+var (
+	config    Config
+	clientSet = getClient()
+)
+
 // Config contains the server (the webhook) cert and key.
 type Config struct {
-	CertFile string
-	KeyFile  string
+	CertFile    string
+	KeyFile     string
+	DefaultMode bool
 }
 
 func (c *Config) addFlags() {
@@ -41,6 +44,15 @@ func (c *Config) addFlags() {
 		"after server cert).")
 	flag.StringVar(&c.KeyFile, "tls-private-key-file", c.KeyFile, ""+
 		"File containing the default x509 private key matching --tls-cert-file.")
+	flag.BoolVar(&c.DefaultMode, "default-mode", c.DefaultMode, ""+
+		"If default cni mode is `tke-route-eni`, All pods(except hostNetwork) who's annotation"+
+		" `tke.cloud.tencent.com/networks` not exist would add eni-ip resource limit, otherwise, use pod's annotation"+
+		" `tke.cloud.tencent.com/networks` to select cni.")
+}
+
+func init() {
+	config.addFlags()
+	flag.Parse()
 }
 
 func toAdmissionResponse(err error) *v1beta1.AdmissionResponse {
@@ -57,7 +69,28 @@ type ThingSpec struct {
 	Value json.RawMessage `json:"value"`
 }
 
-// mutate pods using tke-eni-cni.
+func getPatchData(res corev1.ResourceRequirements) ([]byte, error) {
+	if res.Limits == nil {
+		res.Limits = make(corev1.ResourceList)
+	}
+	res.Limits[UnderlayIPResource] = *resource.NewQuantity(1, resource.DecimalSI)
+	replaceBytes, err := json.Marshal(res)
+	if err != nil {
+		return nil, err
+	}
+
+	things := make([]ThingSpec, 1)
+	things[0].Op = PatchOPType
+	things[0].Path = UnderlayIPJsonPath
+	things[0].Value = replaceBytes
+	patchBytes, err := json.Marshal(things)
+	if err != nil {
+		return nil, err
+	}
+	return patchBytes, nil
+}
+
+// mutate pods using tke-route-eni.
 func mutatePods(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 	glog.V(2).Info("mutating pods")
 	podResource := metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
@@ -75,69 +108,33 @@ func mutatePods(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 	}
 	reviewResponse := v1beta1.AdmissionResponse{}
 	reviewResponse.Allowed = true
+	if pod.Spec.HostNetwork {
+		return &reviewResponse
+	}
+
+	var toAdd bool
 	networks, ok := pod.Annotations[CNINetworksAnnotation]
-	if ok && strings.Contains(networks, TkeEniCNI) {
-		res := pod.Spec.Containers[0].Resources
-		if res.Requests == nil {
-			res.Requests = make(corev1.ResourceList)
+	if ok {
+		if strings.Contains(networks, TKERouteENI) {
+			toAdd = true
 		}
-		res.Requests[UnderlayIPResource] = *resource.NewQuantity(1, resource.DecimalSI)
-		if res.Limits == nil {
-			res.Limits = make(corev1.ResourceList)
+	} else {
+		if config.DefaultMode {
+			toAdd = true
 		}
-		res.Limits[UnderlayIPResource] = *resource.NewQuantity(1, resource.DecimalSI)
-		replaceBytes, err := json.Marshal(res)
-		if err != nil {
-			glog.Error(err)
-			return toAdmissionResponse(err)
-		}
-
-		things := make([]ThingSpec, 1)
-		things[0].Op = PatchOPType
-		things[0].Path = UnderlayIPJsonPath
-		things[0].Value = replaceBytes
-		patchBytes, err := json.Marshal(things)
-		if err != nil {
-			glog.Error(err)
-			return toAdmissionResponse(err)
-		}
-
-		reviewResponse.Patch = patchBytes
-		pt := v1beta1.PatchTypeJSONPatch
-		reviewResponse.PatchType = &pt
 	}
-	return &reviewResponse
-}
-
-// deny statefulsets with static ip but cni not using tke-eni-cni.
-func admitStatefulSets(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
-	glog.V(2).Info("admitting statefulsets")
-	statefulSetResource := metav1.GroupVersionResource{Group: "apps", Version: "v1beta1", Resource: "statefulsets"}
-	if ar.Request.Resource != statefulSetResource {
-		glog.Errorf("expect resource to be %s", statefulSetResource)
-		return nil
+	if !toAdd {
+		return &reviewResponse
 	}
 
-	raw := ar.Request.Object.Raw
-	statefulset := appsv1.StatefulSet{}
-	deserializer := codecs.UniversalDeserializer()
-	if _, _, err := deserializer.Decode(raw, nil, &statefulset); err != nil {
+	pd, err := getPatchData(pod.Spec.Containers[0].Resources)
+	if err != nil {
 		glog.Error(err)
 		return toAdmissionResponse(err)
 	}
-	reviewResponse := v1beta1.AdmissionResponse{}
-	reviewResponse.Allowed = true
-	_, ok1 := statefulset.Annotations[StaticIPConfigAnnotation]
-	_, ok2 := statefulset.Annotations[StaticIPListAnnotation]
-	if ok1 || ok2 {
-		networks, ok := statefulset.Spec.Template.Annotations[CNINetworksAnnotation]
-		if !ok || !strings.Contains(networks, TkeEniCNI) {
-			reviewResponse.Allowed = false
-			reviewResponse.Result = &metav1.Status{
-				Reason: "the statefulset not using tke-eni-cni",
-			}
-		}
-	}
+	reviewResponse.Patch = pd
+	pt := v1beta1.PatchTypeJSONPatch
+	reviewResponse.PatchType = &pt
 	return &reviewResponse
 }
 
@@ -227,21 +224,11 @@ func serveMutatePods(w http.ResponseWriter, r *http.Request) {
 	serve(w, r, mutatePods)
 }
 
-func serveStatefulSets(w http.ResponseWriter, r *http.Request) {
-	serve(w, r, admitStatefulSets)
-}
-
 func main() {
-	var config Config
-	config.addFlags()
-	flag.Parse()
-
-	http.HandleFunc("/mutating-pods", serveMutatePods)
-	http.HandleFunc("/statefulsets", serveStatefulSets)
-	clientset := getClient()
+	http.HandleFunc("/add-pod-eni-ip-limit", serveMutatePods)
 	server := &http.Server{
 		Addr:      ":443",
-		TLSConfig: configTLS(config, clientset),
+		TLSConfig: configTLS(config, clientSet),
 	}
 	server.ListenAndServeTLS("", "")
 }
