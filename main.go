@@ -27,6 +27,7 @@ const (
 )
 
 var (
+	version   string
 	config    Config
 	clientSet = getClient()
 )
@@ -109,6 +110,7 @@ func mutatePods(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 	reviewResponse := v1beta1.AdmissionResponse{}
 	reviewResponse.Allowed = true
 	if pod.Spec.HostNetwork {
+		glog.V(3).Infof("hostNetwork pod %s/%s, just return", pod.Namespace, pod.Name)
 		return &reviewResponse
 	}
 
@@ -124,6 +126,7 @@ func mutatePods(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 		}
 	}
 	if !toAdd {
+		glog.V(3).Infof("not %s pod %s/%s, just return", TKERouteENI, pod.Namespace, pod.Name)
 		return &reviewResponse
 	}
 
@@ -155,7 +158,7 @@ func serve(w http.ResponseWriter, r *http.Request, admit admitFunc) {
 		return
 	}
 
-	glog.V(2).Info(fmt.Sprintf("handling request: %s", string(body)))
+	glog.V(4).Info(fmt.Sprintf("handling request: %s", string(body)))
 	var reviewResponse *v1beta1.AdmissionResponse
 	ar := v1beta1.AdmissionReview{}
 	deserializer := codecs.UniversalDeserializer()
@@ -225,6 +228,11 @@ func serveMutatePods(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	flag.VisitAll(func(i *flag.Flag) {
+		glog.V(2).Infof("FLAG: --%s=%q", i.Name, i.Value)
+	})
+	glog.V(2).Infof("Version: %+v", version)
+
 	http.HandleFunc("/add-pod-eni-ip-limit", serveMutatePods)
 	server := &http.Server{
 		Addr:      ":443",
