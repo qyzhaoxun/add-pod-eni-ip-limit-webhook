@@ -8,13 +8,17 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/golang/glog"
+
 	"k8s.io/api/admission/v1beta1"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 const (
@@ -24,19 +28,22 @@ const (
 	PatchOPType        = "replace"
 	UnderlayIPJsonPath = "/spec/containers/0/resources"
 	UnderlayIPResource = "tke.cloud.tencent.com/eni-ip"
+
+	TKECNIConfCM  = "tke-cni-agent-conf"
+	MultusCNIConf = "00-multus.conf"
 )
 
 var (
-	version   string
-	config    Config
-	clientSet = getClient()
+	version    string
+	config     Config
+	clientSet  = getClient()
+	defaultCNI = false
 )
 
 // Config contains the server (the webhook) cert and key.
 type Config struct {
-	CertFile    string
-	KeyFile     string
-	DefaultMode bool
+	CertFile string
+	KeyFile  string
 }
 
 func (c *Config) addFlags() {
@@ -45,10 +52,6 @@ func (c *Config) addFlags() {
 		"after server cert).")
 	flag.StringVar(&c.KeyFile, "tls-private-key-file", c.KeyFile, ""+
 		"File containing the default x509 private key matching --tls-cert-file.")
-	flag.BoolVar(&c.DefaultMode, "default-mode", c.DefaultMode, ""+
-		"If default cni mode is `tke-route-eni`, All pods(except hostNetwork) who's annotation"+
-		" `tke.cloud.tencent.com/networks` not exist would add eni-ip resource limit, otherwise, use pod's annotation"+
-		" `tke.cloud.tencent.com/networks` to select cni.")
 }
 
 func init() {
@@ -121,7 +124,7 @@ func mutatePods(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 			toAdd = true
 		}
 	} else {
-		if config.DefaultMode {
+		if defaultCNI {
 			toAdd = true
 		}
 	}
@@ -227,11 +230,53 @@ func serveMutatePods(w http.ResponseWriter, r *http.Request) {
 	serve(w, r, mutatePods)
 }
 
+type NetConf struct {
+	DefaultDelegates string `json:"defaultDelegates"`
+}
+
+func setDefaultCNI() error {
+	return wait.PollImmediateInfinite(time.Second*3, func() (done bool, err error) {
+		cm, err := clientSet.CoreV1().ConfigMaps(metav1.NamespaceSystem).Get(TKECNIConfCM, metav1.GetOptions{})
+		if err != nil {
+			if k8serrors.IsNotFound(err) {
+				// consider tke-route-eni is default cni
+				defaultCNI = true
+				return true, nil
+			}
+			glog.Warningf("Failed to get cm %s/%s, will retry(%v)", metav1.NamespaceSystem, TKECNIConfCM, err)
+			return false, nil
+		}
+		// get defaultDelegates from key 00-multus.conf
+		str, ok := cm.Data[MultusCNIConf]
+		if ok {
+			var netConf NetConf
+			bytes := []byte(str)
+			err = json.Unmarshal(bytes, &netConf)
+			if err != nil {
+				return false, err
+			}
+			if strings.Contains(netConf.DefaultDelegates, TKERouteENI) {
+				defaultCNI = true
+			}
+			glog.Infof("default cni is %s, set defaultCNI to %t", netConf.DefaultDelegates, defaultCNI)
+			return true, nil
+		} else {
+			return false, fmt.Errorf("no %s key found in cm %s/%s", MultusCNIConf, metav1.NamespaceSystem, TKECNIConfCM)
+		}
+		return true, nil
+	})
+}
+
 func main() {
 	flag.VisitAll(func(i *flag.Flag) {
 		glog.V(2).Infof("FLAG: --%s=%q", i.Name, i.Value)
 	})
 	glog.V(2).Infof("Version: %+v", version)
+
+	err := setDefaultCNI()
+	if err != nil {
+		glog.Fatalf("Failed to determine whether %s is default cni, %v", TKERouteENI, err)
+	}
 
 	http.HandleFunc("/add-pod-eni-ip-limit", serveMutatePods)
 	server := &http.Server{
