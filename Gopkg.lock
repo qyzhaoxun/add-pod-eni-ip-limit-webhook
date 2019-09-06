@@ -264,7 +264,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:0d9bf4c072699dbbaf6a664bc4f42752e3482d1a73ed5c4b12dfcf285ee36ca3"
+  digest = "1:c7521c83b8a3855b2d5f1753383eeb5ddffaac3f80dcf4c9a2c53a688d4593f0"
   name = "k8s.io/apimachinery"
   packages = [
     "pkg/api/errors",
@@ -298,6 +298,7 @@
     "pkg/util/sets",
     "pkg/util/validation",
     "pkg/util/validation/field",
+    "pkg/util/wait",
     "pkg/util/yaml",
     "pkg/version",
     "pkg/watch",
@@ -387,11 +388,13 @@
     "github.com/golang/glog",
     "k8s.io/api/admission/v1beta1",
     "k8s.io/api/admissionregistration/v1beta1",
-    "k8s.io/api/apps/v1beta2",
     "k8s.io/api/core/v1",
+    "k8s.io/apimachinery/pkg/api/errors",
+    "k8s.io/apimachinery/pkg/api/resource",
     "k8s.io/apimachinery/pkg/apis/meta/v1",
     "k8s.io/apimachinery/pkg/runtime",
     "k8s.io/apimachinery/pkg/runtime/serializer",
+    "k8s.io/apimachinery/pkg/util/wait",
     "k8s.io/client-go/kubernetes",
     "k8s.io/client-go/rest",
   ]
