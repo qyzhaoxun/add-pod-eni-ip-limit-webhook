@@ -26,8 +26,9 @@ spec:
       labels:
         k8s-app: add-pod-eni-ip-limit-webhook
     spec:
+      serviceAccountName: add-pod-eni-ip-limit-webhook
       containers:
-      - image: ccr.ccs.tencentyun.com/tkeimages/add-pod-eni-ip-limit-webhook:v0.0.1
+      - image: ccr.ccs.tencentyun.com/tkeimages/add-pod-eni-ip-limit-webhook:v0.0.2
         args: ["--tls-cert-file=/webhook.local.config/certificates/tls.crt", "--tls-private-key-file=/webhook.local.config/certificates/tls.key", "--alsologtostderr", "-v=4", "2>&1"]
         imagePullPolicy: Always
         name: add-pod-eni-ip-limit-webhook

@@ -11,25 +11,16 @@
 * 确保 kube-apiserver 启用 `MutatingAdmissionWebhook` admission controller
 
 
-## 部署
-#### webhook 运行参数
-| 参数 | 含义 | 默认 | 变更风险 | 示例 |
-|:---|:---:|:----:|:-----:|:----|
-|`--tls-cert-file`|服务端证书|空|***确保证书合法***|`--tls-cert-file=/webhook.local.config/certificates/tls.crt`|
-|`--tls-private-key-file`|服务端私钥|空|***确保私钥合法***|`--tls-private-key-file=/webhook.local.config/certificates/tls.key`|
-|`--default-mode`|`tke-route-eni` 是否为默认网络模式|`false`|***确保使用 `tke-route-eni` 网络模式的 pod 都添加上了 `eni-ip` request***|`--default-mode`|
-
-注意：***如果 `--default-mode` 为 true，在 pod.annotation `tke.cloud.tencent.com/networks` 不存在时，也会给 pod 添加 `eni-ip` request；否则只会当 annotation 中显示指定了 `tke-route-eni` 时才给 pod 添加 `eni-ip` request。***
-
+## 使用
 ### 部署 webhook
 
 ```$xslt
-kubectl create ./deploy/v0.0.1/webhook-registration.yaml
-kubectl create ./deploy/v0.0.1/webhook.yaml
+kubectl create ./deploy/webhook-registration.yaml
+kubectl create ./deploy/webhook-rbac.yaml
+kubectl create ./deploy/webhook.yaml
 ```
 
-## 验证
-* 开启 default-mode
+### 创建 pod
 * 执行以下命令
 ```$xslt
 kubectl run busybox --image busybox --command -- sleep 1000000
@@ -57,6 +48,22 @@ Containers:
     Requests:
       tke.cloud.tencent.com/eni-ip:  1
 ```
+
+
+### webhook 运行参数
+| 参数 | 含义 | 默认 | 变更风险 | 示例 |
+|:---|:---:|:----:|:-----:|:----|
+|`--tls-cert-file`|服务端证书|空|***确保证书合法***|`--tls-cert-file=/webhook.local.config/certificates/tls.crt`|
+|`--tls-private-key-file`|服务端私钥|空|***确保私钥合法***|`--tls-private-key-file=/webhook.local.config/certificates/tls.key`|
+
+
+## 和 tke-cni-agent 搭配使用
+[tke-cni-agent](https://github.com/qyzhaoxun/multus-cni) 是 `tke` 团队基于 `multus-cni` 实现的可以让 pod 自主选择网络插件的组件。
+
+<p align="center">
+   <img src="./docs/images/add-pod-eni-ip-webhook.png" />
+</p>
+
 
 ## 开发指引
 * `make` 默认执行 `make build` 会构建 Linux 平台二进制文件。
