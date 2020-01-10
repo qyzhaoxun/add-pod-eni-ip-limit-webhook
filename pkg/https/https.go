@@ -1,13 +1,14 @@
-package main
+package https
 
 import (
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"reflect"
 	"strings"
+
+	"github.com/qyzhaoxun/add-pod-eni-ip-limit-webhook/pkg/schema"
 
 	"k8s.io/api/admission/v1beta1"
 	corev1 "k8s.io/api/core/v1"
@@ -18,17 +19,14 @@ import (
 	"github.com/golang/glog"
 )
 
-func configTLS(config Config) *tls.Config {
-	sCert, err := tls.LoadX509KeyPair(config.CertFile, config.KeyFile)
-	if err != nil {
-		glog.Fatal(err)
-	}
-	return &tls.Config{
-		Certificates: []tls.Certificate{sCert},
-		// TODO: uses mutual tls after we agree on what cert the apiserver should use.
-		// ClientAuth:   tls.RequireAndVerifyClientCert,
-	}
-}
+const (
+	TKERouteENI           = "tke-route-eni"
+	CNINetworksAnnotation = "tke.cloud.tencent.com/networks"
+
+	PatchOPType        = "replace"
+	UnderlayIPJsonPath = "/spec/containers/0/resources"
+	UnderlayIPResource = "tke.cloud.tencent.com/eni-ip"
+)
 
 func toAdmissionResponse(err error) *v1beta1.AdmissionResponse {
 	return &v1beta1.AdmissionResponse{
@@ -124,7 +122,7 @@ func (s *httpsSvr) mutatePods(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResp
 
 	raw := ar.Request.Object.Raw
 	pod := corev1.Pod{}
-	deserializer := codecs.UniversalDeserializer()
+	deserializer := schema.Codecs.UniversalDeserializer()
 	if _, _, err := deserializer.Decode(raw, nil, &pod); err != nil {
 		glog.Error(err)
 		return toAdmissionResponse(err)
@@ -181,7 +179,7 @@ func (s *httpsSvr) serve(w http.ResponseWriter, r *http.Request, admit admitFunc
 	glog.V(4).Info(fmt.Sprintf("handling request: %s", string(body)))
 	var reviewResponse *v1beta1.AdmissionResponse
 	ar := v1beta1.AdmissionReview{}
-	deserializer := codecs.UniversalDeserializer()
+	deserializer := schema.Codecs.UniversalDeserializer()
 	if _, _, err := deserializer.Decode(body, nil, &ar); err != nil {
 		glog.Error(err)
 		reviewResponse = toAdmissionResponse(err)

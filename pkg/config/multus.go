@@ -1,10 +1,12 @@
-package main
+package config
 
 import (
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/qyzhaoxun/add-pod-eni-ip-limit-webhook/pkg/https"
 
 	"github.com/golang/glog"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -22,7 +24,7 @@ type NetConf struct {
 	DefaultDelegates string `json:"defaultDelegates"`
 }
 
-func getDefaultCNIFromMultus(clienset kubernetes.Interface) (bool, error) {
+func GetDefaultCNIFromMultus(clienset kubernetes.Interface) (bool, error) {
 	var defaultCNI bool
 	err := wait.PollImmediateInfinite(time.Second*3, func() (done bool, err error) {
 		cm, err := clienset.CoreV1().ConfigMaps(metav1.NamespaceSystem).Get(TKECNIConfCM, metav1.GetOptions{})
@@ -44,15 +46,13 @@ func getDefaultCNIFromMultus(clienset kubernetes.Interface) (bool, error) {
 			if err != nil {
 				return false, err
 			}
-			if strings.Contains(netConf.DefaultDelegates, TKERouteENI) {
+			if strings.Contains(netConf.DefaultDelegates, https.TKERouteENI) {
 				defaultCNI = true
 			}
 			glog.Infof("default cni is %s, set defaultCNI to %t", netConf.DefaultDelegates, defaultCNI)
 			return true, nil
-		} else {
-			return false, fmt.Errorf("no %s key found in cm %s/%s", MultusCNIConf, metav1.NamespaceSystem, TKECNIConfCM)
 		}
-		return true, nil
+		return false, fmt.Errorf("no %s key found in cm %s/%s", MultusCNIConf, metav1.NamespaceSystem, TKECNIConfCM)
 	})
 	return defaultCNI, err
 }

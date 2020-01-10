@@ -1,4 +1,4 @@
-package main
+package schema
 
 import (
 	admissionregistrationv1beta1 "k8s.io/api/admissionregistration/v1beta1"
@@ -7,11 +7,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 )
 
-var scheme = runtime.NewScheme()
-var codecs = serializer.NewCodecFactory(scheme)
+var Scheme = runtime.NewScheme()
+var Codecs = serializer.NewCodecFactory(Scheme)
 
 func init() {
-	addToScheme(scheme)
+	addToScheme(Scheme)
 }
 
 func addToScheme(scheme *runtime.Scheme) {

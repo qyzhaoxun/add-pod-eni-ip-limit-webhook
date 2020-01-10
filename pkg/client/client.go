@@ -1,4 +1,4 @@
-package main
+package client
 
 import (
 	"fmt"
@@ -10,8 +10,8 @@ import (
 	"github.com/golang/glog"
 )
 
-// CreateKubeClient creates a k8s client
-func getKubeClient(incluster bool, apiserver string, kubeconfig string) (kubernetes.Interface, error) {
+// GetKubeClient creates a k8s client
+func GetKubeClient(incluster bool, apiserver string, kubeconfig string) (kubernetes.Interface, error) {
 	var config *rest.Config
 	var err error
 
