@@ -20,9 +20,9 @@ build:
 docker-build:
 	docker run --rm -v $(shell pwd):$(CONTAINER_BUILD_PATH) \
 		--workdir=$(CONTAINER_BUILD_PATH) \
-		golang:1.10 make build
+		golang:1.14 bash -c "go mod tidy&&make build"
 
-docker: docker-build
+docker:
 	@docker build -f Dockerfile -t "$(IMAGE):$(VERSION)" .
 	@echo "Built Docker image \"$(IMAGE):$(VERSION)\""
 
