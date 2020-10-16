@@ -3,6 +3,7 @@ package https
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/qyzhaoxun/add-pod-eni-ip-limit-webhook/pkg/config"
 	"io/ioutil"
 	"net/http"
 	"reflect"
@@ -21,12 +22,21 @@ import (
 
 const (
 	TKERouteENI           = "tke-route-eni"
+	TKEDirectENI          = "tke-direct-eni"
 	CNINetworksAnnotation = "tke.cloud.tencent.com/networks"
 
-	PatchOPType        = "replace"
-	UnderlayIPJsonPath = "/spec/containers/0/resources"
-	UnderlayIPResource = "tke.cloud.tencent.com/eni-ip"
+	PatchOPType                                  = "replace"
+	UnderlayResourceJsonPath                     = "/spec/containers/0/resources"
+	UnderlayIPResource       corev1.ResourceName = "tke.cloud.tencent.com/eni-ip"
+	UnderlayENIResource      corev1.ResourceName = "tke.cloud.tencent.com/direct-eni"
 )
+
+const (
+	DirectResource ResourceType = "tke-direct-eni"
+	RouteResource  ResourceType = "tke-route-eni"
+)
+
+type ResourceType string
 
 func toAdmissionResponse(err error) *v1beta1.AdmissionResponse {
 	return &v1beta1.AdmissionResponse{
@@ -42,11 +52,11 @@ type ThingSpec struct {
 	Value json.RawMessage `json:"value"`
 }
 
-func getPatchData(res corev1.ResourceRequirements) ([]byte, error) {
+func getPatchData(resourceType corev1.ResourceName, res corev1.ResourceRequirements) ([]byte, error) {
 	if res.Limits == nil {
 		res.Limits = make(corev1.ResourceList)
 	}
-	res.Limits[UnderlayIPResource] = *resource.NewQuantity(1, resource.DecimalSI)
+	res.Limits[resourceType] = *resource.NewQuantity(1, resource.DecimalSI)
 	replaceBytes, err := json.Marshal(res)
 	if err != nil {
 		return nil, err
@@ -54,7 +64,7 @@ func getPatchData(res corev1.ResourceRequirements) ([]byte, error) {
 
 	things := make([]ThingSpec, 1)
 	things[0].Op = PatchOPType
-	things[0].Path = UnderlayIPJsonPath
+	things[0].Path = UnderlayResourceJsonPath
 	things[0].Value = replaceBytes
 	patchBytes, err := json.Marshal(things)
 	if err != nil {
@@ -103,17 +113,16 @@ type HttpsServer interface {
 	ServeHttps(w http.ResponseWriter, r *http.Request)
 }
 
-func NewHttpsServer(defaultCNI bool) HttpsServer {
+func NewHttpsServer(defaultCNI string) HttpsServer {
 	return &httpsSvr{defaultCNI: defaultCNI}
 }
 
 type httpsSvr struct {
-	defaultCNI bool
+	defaultCNI string
 }
 
 // mutate pods using tke-route-eni.
 func (s *httpsSvr) mutatePods(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
-	glog.V(2).Info("mutating pods")
 	podResource := metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
 	if ar.Request.Resource != podResource {
 		glog.Errorf("expect resource to be %s", podResource)
@@ -127,34 +136,52 @@ func (s *httpsSvr) mutatePods(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResp
 		glog.Error(err)
 		return toAdmissionResponse(err)
 	}
+	glog.Infof("mutating pod: %s/%s", pod.Namespace, pod.Name)
 	reviewResponse := v1beta1.AdmissionResponse{}
 	reviewResponse.Allowed = true
 	if pod.Spec.HostNetwork {
-		glog.V(3).Infof("hostNetwork pod %s/%s, just return", pod.Namespace, pod.Name)
+		glog.Infof("pod %s/%s is hostNetwork, just return", pod.Namespace, pod.Name)
 		return &reviewResponse
 	}
 
-	var toAdd bool
+	var resourceToAdd ResourceType
 	networks, ok := pod.Annotations[CNINetworksAnnotation]
 	if ok {
-		if strings.Contains(networks, TKERouteENI) {
-			toAdd = true
+		if strings.Contains(networks, TKEDirectENI) {
+			resourceToAdd = DirectResource
+		} else if strings.Contains(networks, TKERouteENI) {
+			resourceToAdd = RouteResource
 		}
 	} else {
-		if s.defaultCNI {
-			toAdd = true
+		if s.defaultCNI == config.TKEDirectENI {
+			resourceToAdd = DirectResource
+		} else if s.defaultCNI == config.TKERouteENI {
+			resourceToAdd = RouteResource
 		}
 	}
-	if !toAdd {
-		glog.V(3).Infof("not %s pod %s/%s, just return", TKERouteENI, pod.Namespace, pod.Name)
+
+	var pd []byte
+	var err error
+
+	switch resourceToAdd {
+	case DirectResource:
+		pd, err = getPatchData(UnderlayENIResource, pod.Spec.Containers[0].Resources)
+		if err != nil {
+			glog.Error(err)
+			return toAdmissionResponse(err)
+		}
+	case RouteResource:
+		pd, err = getPatchData(UnderlayIPResource, pod.Spec.Containers[0].Resources)
+		if err != nil {
+			glog.Error(err)
+			return toAdmissionResponse(err)
+		}
+	default:
+		glog.Infof("pod %s/%s doesn't contain annotation %s and default cni is %s. Nothing to patch",
+			pod.Namespace, pod.Name, CNINetworksAnnotation, s.defaultCNI)
 		return &reviewResponse
 	}
 
-	pd, err := getPatchData(pod.Spec.Containers[0].Resources)
-	if err != nil {
-		glog.Error(err)
-		return toAdmissionResponse(err)
-	}
 	reviewResponse.Patch = pd
 	pt := v1beta1.PatchTypeJSONPatch
 	reviewResponse.PatchType = &pt
