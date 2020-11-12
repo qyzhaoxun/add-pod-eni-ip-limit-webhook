@@ -136,11 +136,19 @@ func (s *httpsSvr) mutatePods(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResp
 		glog.Error(err)
 		return toAdmissionResponse(err)
 	}
-	glog.Infof("mutating pod: %s/%s", pod.Namespace, pod.Name)
+	if pod.OwnerReferences != nil && len(pod.OwnerReferences) > 0 {
+		glog.V(2).Infof("mutating pod of %s %s in namespace %s", pod.OwnerReferences[0].Kind, pod.OwnerReferences[0].Name, ar.Request.Namespace)
+	} else {
+		glog.V(2).Infof("mutating pod %s/%s", ar.Request.Namespace, ar.Request.Name)
+	}
 	reviewResponse := v1beta1.AdmissionResponse{}
 	reviewResponse.Allowed = true
 	if pod.Spec.HostNetwork {
-		glog.Infof("pod %s/%s is hostNetwork, just return", pod.Namespace, pod.Name)
+		if pod.OwnerReferences != nil && len(pod.OwnerReferences) > 0 {
+			glog.V(2).Infof("pod of %s %s in namespace %s is HostNetwork, just return", pod.OwnerReferences[0].Kind, pod.OwnerReferences[0].Name, ar.Request.Namespace)
+		} else {
+			glog.V(2).Infof("pod %s/%s is HostNetwork, just return", ar.Request.Namespace, ar.Request.Name)
+		}
 		return &reviewResponse
 	}
 
