@@ -1,6 +1,9 @@
-FROM alpine:3.6
-
+ARG BASEIMAGE
+FROM ${BASEIMAGE}
+ARG GOOS
+ARG GOARCH
+ARG BIN_PATH=bin/${GOOS}/${GOARCH}
 RUN apk add --no-cache ca-certificates
 
-ADD ./bin/add-pod-eni-ip-limit-webhook /webhook
-ENTRYPOINT ["/webhook"]
+COPY ${BIN_PATH}/add-pod-eni-ip-limit-webhook /
+ENTRYPOINT ["/add-pod-eni-ip-limit-webhook"]

@@ -3,13 +3,18 @@ package main
 import (
 	"crypto/tls"
 	"flag"
-	"net/http"
-
+	log "github.com/cihub/seelog"
 	"github.com/qyzhaoxun/add-pod-eni-ip-limit-webhook/pkg/client"
 	wenhookconfig "github.com/qyzhaoxun/add-pod-eni-ip-limit-webhook/pkg/config"
 	"github.com/qyzhaoxun/add-pod-eni-ip-limit-webhook/pkg/https"
+	"github.com/qyzhaoxun/add-pod-eni-ip-limit-webhook/pkg/util"
+	"github.com/qyzhaoxun/add-pod-eni-ip-limit-webhook/pkg/util/logger"
+	"k8s.io/client-go/kubernetes"
+	"net/http"
+)
 
-	"github.com/golang/glog"
+const (
+	defaultLogFilePath = "/host/var/log/tke-route-eni/eni-webhook.log"
 )
 
 var (
@@ -18,39 +23,30 @@ var (
 )
 
 func configTLS(config Config) *tls.Config {
-	sCert, err := tls.LoadX509KeyPair(config.CertFile, config.KeyFile)
+	sCert, err := tls.X509KeyPair([]byte(config.Cert), []byte(config.Key))
 	if err != nil {
-		glog.Fatal(err)
+		log.Error(err)
+		return nil
 	}
 	return &tls.Config{
 		Certificates: []tls.Certificate{sCert},
-		// TODO: uses mutual tls after we agree on what cert the apiserver should use.
-		// ClientAuth:   tls.RequireAndVerifyClientCert,
 	}
 }
 
 // Config contains the server (the webhook) cert and key.
 type Config struct {
-	CertFile   string
-	KeyFile    string
+	Cert       string
+	Key        string
 	InCluster  bool
 	Master     string
 	KubeConfig string
-	PresetMode bool
-	DefaultCNI bool
+	DefaultCNI string
 }
 
 func (c *Config) addFlags() {
-	flag.StringVar(&c.CertFile, "tls-cert-file", c.CertFile, ""+
-		"File containing the default x509 Certificate for HTTPS. (CA cert, if any, concatenated "+
-		"after server cert).")
-	flag.StringVar(&c.KeyFile, "tls-private-key-file", c.KeyFile, ""+
-		"File containing the default x509 private key matching --tls-cert-file.")
 	flag.BoolVar(&c.InCluster, "incluster", true, "Whether agent runs on incluster.")
 	flag.StringVar(&c.Master, "master", c.Master, "The address of the Kubernetes API server (overrides any value in kubeconfig).")
 	flag.StringVar(&c.KubeConfig, "kubeconfig", c.KubeConfig, "Path to kubeconfig file with authorization and master location information.")
-	flag.BoolVar(&c.PresetMode, "preset-mode", c.PresetMode, "Whether webhook running on preset mode.")
-	flag.BoolVar(&c.DefaultCNI, "default-cni", c.DefaultCNI, "Whether tke-route-eni is default-cni(need preset-mode=true).")
 }
 
 func init() {
@@ -59,31 +55,49 @@ func init() {
 }
 
 func main() {
+	logger.SetupLogger(logger.GetLogFileLocation(defaultLogFilePath))
 	flag.VisitAll(func(i *flag.Flag) {
-		glog.V(2).Infof("FLAG: --%s=%q", i.Name, i.Value)
+		log.Debugf("FLAG: --%s=%q", i.Name, i.Value)
 	})
-	glog.V(2).Infof("Version: %+v", version)
+	log.Debugf("Version: %+v", version)
 
-	var defaultCNI bool
-	if config.PresetMode {
-		defaultCNI = config.DefaultCNI
-	} else {
-		cs, err := client.GetKubeClient(config.InCluster, config.Master, config.KubeConfig)
-		if err != nil {
-			glog.Fatalf("Failed to get kube client: %v", err)
-		}
-		defaultCNI, err = wenhookconfig.GetDefaultCNIFromMultus(cs)
-		if err != nil {
-			glog.Fatalf("Failed to determine whether %s is default cni, %v", https.TKERouteENI, err)
-		}
+	var defaultCNI string
+	var kubeClient kubernetes.Interface
+	var err error
+
+	kubeClient, err = client.GetKubeClient(config.InCluster, config.Master, config.KubeConfig)
+	if err != nil {
+		log.Errorf("Failed to get kube client: %v", err)
+		return
+	}
+	defaultCNI, err = wenhookconfig.GetDefaultCNIFromMultus(kubeClient)
+	if err != nil {
+		log.Errorf("Failed to determine which is default cni: %s", err.Error())
+		return
 	}
 
-	glog.Infof("Whether %s is default cni: %t", https.TKERouteENI, defaultCNI)
+	log.Infof("Default CNI is %s", defaultCNI)
+
+	crtConfig, err := util.GenCrt(kubeClient, config.InCluster)
+	if err != nil {
+		log.Errorf("failed to generate crt and key: %s", err.Error())
+		return
+	}
+	if crtConfig == nil {
+		log.Errorf("failed to generate crt and key.")
+		return
+	}
+	config.Cert = crtConfig.Cert
+	config.Key = crtConfig.Key
 	hs := https.NewHttpsServer(defaultCNI)
-	http.HandleFunc("/add-pod-eni-ip-limit", hs.ServeHttps)
+	http.HandleFunc(util.Path, hs.ServeHttps)
+	tlsConfig := configTLS(config)
+	if tlsConfig == nil {
+		return
+	}
 	server := &http.Server{
-		Addr:      ":443",
-		TLSConfig: configTLS(config),
+		Addr:      ":61679",
+		TLSConfig: tlsConfig,
 	}
 	server.ListenAndServeTLS("", "")
 }
