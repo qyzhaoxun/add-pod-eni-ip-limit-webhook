@@ -17,7 +17,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
-	"github.com/golang/glog"
+	log "github.com/cihub/seelog"
 )
 
 const (
@@ -125,7 +125,7 @@ type httpsSvr struct {
 func (s *httpsSvr) mutatePods(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
 	podResource := metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
 	if ar.Request.Resource != podResource {
-		glog.Errorf("expect resource to be %s", podResource)
+		log.Errorf("expect resource to be %s", podResource)
 		return nil
 	}
 
@@ -133,21 +133,21 @@ func (s *httpsSvr) mutatePods(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResp
 	pod := corev1.Pod{}
 	deserializer := schema.Codecs.UniversalDeserializer()
 	if _, _, err := deserializer.Decode(raw, nil, &pod); err != nil {
-		glog.Error(err)
+		log.Error(err)
 		return toAdmissionResponse(err)
 	}
 	if pod.OwnerReferences != nil && len(pod.OwnerReferences) > 0 {
-		glog.V(2).Infof("mutating pod of %s %s in namespace %s", pod.OwnerReferences[0].Kind, pod.OwnerReferences[0].Name, ar.Request.Namespace)
+		log.Infof("mutating pod of %s %s in namespace %s", pod.OwnerReferences[0].Kind, pod.OwnerReferences[0].Name, ar.Request.Namespace)
 	} else {
-		glog.V(2).Infof("mutating pod %s/%s", ar.Request.Namespace, ar.Request.Name)
+		log.Infof("mutating pod %s/%s", ar.Request.Namespace, ar.Request.Name)
 	}
 	reviewResponse := v1beta1.AdmissionResponse{}
 	reviewResponse.Allowed = true
 	if pod.Spec.HostNetwork {
 		if pod.OwnerReferences != nil && len(pod.OwnerReferences) > 0 {
-			glog.V(2).Infof("pod of %s %s in namespace %s is HostNetwork, just return", pod.OwnerReferences[0].Kind, pod.OwnerReferences[0].Name, ar.Request.Namespace)
+			log.Infof("pod of %s %s in namespace %s is HostNetwork, just return", pod.OwnerReferences[0].Kind, pod.OwnerReferences[0].Name, ar.Request.Namespace)
 		} else {
-			glog.V(2).Infof("pod %s/%s is HostNetwork, just return", ar.Request.Namespace, ar.Request.Name)
+			log.Infof("pod %s/%s is HostNetwork, just return", ar.Request.Namespace, ar.Request.Name)
 		}
 		return &reviewResponse
 	}
@@ -175,17 +175,17 @@ func (s *httpsSvr) mutatePods(ar v1beta1.AdmissionReview) *v1beta1.AdmissionResp
 	case DirectResource:
 		pd, err = getPatchData(UnderlayENIResource, pod.Spec.Containers[0].Resources)
 		if err != nil {
-			glog.Error(err)
+			log.Error(err)
 			return toAdmissionResponse(err)
 		}
 	case RouteResource:
 		pd, err = getPatchData(UnderlayIPResource, pod.Spec.Containers[0].Resources)
 		if err != nil {
-			glog.Error(err)
+			log.Error(err)
 			return toAdmissionResponse(err)
 		}
 	default:
-		glog.Infof("pod %s/%s doesn't contain annotation %s and default cni is %s. Nothing to patch",
+		log.Infof("pod %s/%s doesn't contain annotation %s and default cni is %s. Nothing to patch",
 			pod.Namespace, pod.Name, CNINetworksAnnotation, s.defaultCNI)
 		return &reviewResponse
 	}
@@ -207,22 +207,22 @@ func (s *httpsSvr) serve(w http.ResponseWriter, r *http.Request, admit admitFunc
 	// verify the content type is accurate
 	contentType := r.Header.Get("Content-Type")
 	if contentType != "application/json" {
-		glog.Errorf("contentType=%s, expect application/json", contentType)
+		log.Errorf("contentType=%s, expect application/json", contentType)
 		return
 	}
 
-	glog.V(4).Info(fmt.Sprintf("handling request: %s", string(body)))
+	log.Info(fmt.Sprintf("handling request: %s", string(body)))
 	var reviewResponse *v1beta1.AdmissionResponse
 	ar := v1beta1.AdmissionReview{}
 	deserializer := schema.Codecs.UniversalDeserializer()
 	if _, _, err := deserializer.Decode(body, nil, &ar); err != nil {
-		glog.Error(err)
+		log.Error(err)
 		reviewResponse = toAdmissionResponse(err)
 	} else {
 		reviewResponse = admit(ar)
 	}
 
-	glog.V(2).Info(fmt.Sprintf("sending response: %s", formatResponse(reviewResponse)))
+	log.Info(fmt.Sprintf("sending response: %s", formatResponse(reviewResponse)))
 	response := v1beta1.AdmissionReview{}
 	if reviewResponse != nil {
 		response.Response = reviewResponse
@@ -234,11 +234,11 @@ func (s *httpsSvr) serve(w http.ResponseWriter, r *http.Request, admit admitFunc
 
 	resp, err := json.Marshal(response)
 	if err != nil {
-		glog.Error(err)
+		log.Error(err)
 	}
 
 	if _, err := w.Write(resp); err != nil {
-		glog.Error(err)
+		log.Error(err)
 	}
 }
 

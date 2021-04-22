@@ -2,18 +2,18 @@ package util
 
 import (
 	"fmt"
+	log "github.com/cihub/seelog"
 	"github.com/cloudflare/cfssl/cli"
 	"github.com/cloudflare/cfssl/cli/genkey"
 	"github.com/cloudflare/cfssl/cli/sign"
 	"github.com/cloudflare/cfssl/csr"
 	"github.com/cloudflare/cfssl/initca"
 	"github.com/cloudflare/cfssl/signer"
-	"github.com/golang/glog"
 	"io/ioutil"
 	admissionregistrationv1beta1 "k8s.io/api/admissionregistration/v1beta1"
 	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"os"
 	"regexp"
@@ -58,18 +58,18 @@ func GenCrt(kubeClient kubernetes.Interface, incluster bool) (*CertConfig, error
 	secret, err := kubeClient.CoreV1().Secrets(namespace).Get(SecretName, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			glog.Warningf("user may delete the secret. we now use the crt data we generated instead of the data in secret.")
+			log.Warnf("user may delete the secret. we now use the crt data we generated instead of the data in secret.")
 		} else {
-			glog.Errorf("failed to get secret: %s", err.Error())
+			log.Errorf("failed to get secret: %s", err.Error())
 		}
 	}
 	// compare the data
 	crtDataFromSecret := string(secret.Data["tls.crt"])
 	keyDataFromSecret := string(secret.Data["tls.key"])
 	if crtDataFromSecret == string(webhookCert) && keyDataFromSecret == string(webhookKey) {
-		glog.Infof("success to get secret")
+		log.Infof("success to get secret")
 	} else {
-		glog.Warningf("the data in secret is not the crt and key we built")
+		log.Warnf("the data in secret is not the crt and key we built")
 	}
 
 	resultCrt := CertConfig{
@@ -102,7 +102,7 @@ func genCrt(namespace string) (CACert []byte, WebhookKey []byte, WebhookSert []b
 	//4. create webhook csr
 	webhookCSR, webhookKey, err := createWebhookCSR(namespace)
 	if err != nil {
-		glog.Errorf("Create webhook Cert failed %s", err.Error())
+		log.Errorf("Create webhook Cert failed %s", err.Error())
 		return nil, nil, nil, err
 	}
 
@@ -124,7 +124,7 @@ func signCertForWebhook(caCertFile, caKeyFile, caConfigFile *os.File, webhookCSR
 	}
 	webhookSigner, err := sign.SignerFromConfig(signConfig)
 	if err != nil {
-		glog.Errorf("SignerFromConfig Webhook failed %s", err.Error())
+		log.Errorf("SignerFromConfig Webhook failed %s", err.Error())
 		return nil, err
 	}
 	signRequest := signer.SignRequest{
@@ -136,7 +136,7 @@ func signCertForWebhook(caCertFile, caKeyFile, caConfigFile *os.File, webhookCSR
 	// Use Signer to sign cert
 	webhookCert, err := webhookSigner.Sign(signRequest)
 	if err != nil {
-		glog.Errorf("Sign Webhook failed %s", err.Error())
+		log.Errorf("Sign Webhook failed %s", err.Error())
 		return nil, err
 	}
 	return webhookCert, nil
@@ -169,7 +169,7 @@ func createWebhookCSR(namespace string) ([]byte, []byte, error) {
 	generator := &csr.Generator{Validator: genkey.Validator}
 	webhookCSR, webhookKey, err := generator.ProcessRequest(&webhookCertificateRequest)
 	if err != nil {
-		glog.Errorf("ProcessRequest failed %s", err.Error())
+		log.Errorf("ProcessRequest failed %s", err.Error())
 		return nil, nil, err
 	}
 	return webhookCSR, webhookKey, nil
@@ -197,7 +197,7 @@ func newCa(namespace string) ([]byte, []byte, error) {
 	}
 	caCert, _, caKey, err := initca.New(caCertificateRequest)
 	if err != nil {
-		glog.Errorf("InitCA Failed %s", err.Error())
+		log.Errorf("InitCA Failed %s", err.Error())
 		return nil, nil, err
 	}
 	return caCert, caKey, nil
@@ -206,21 +206,21 @@ func newCa(namespace string) ([]byte, []byte, error) {
 func writeTmpFile(caCert, caKey []byte) (*os.File, *os.File, error) {
 	caCertFile, err := ioutil.TempFile("", "ca.pem")
 	if err != nil {
-		glog.Errorf("Tmp file err %s", err.Error())
+		log.Errorf("Tmp file err %s", err.Error())
 		return nil, nil, err
 	}
 
 	if _, err := caCertFile.Write(caCert); err != nil {
-		glog.Errorf("Write CA Pem failed %s", err.Error())
+		log.Errorf("Write CA Pem failed %s", err.Error())
 		return nil, nil, err
 	}
 	caKeyFile, err := ioutil.TempFile("", "ca-key.pem")
 	if err != nil {
-		glog.Errorf("Tmp file err %s", err.Error())
+		log.Errorf("Tmp file err %s", err.Error())
 		return nil, nil, err
 	}
 	if _, err := caKeyFile.Write(caKey); err != nil {
-		glog.Errorf("Write CA Key Pem failed %s", err.Error())
+		log.Errorf("Write CA Key Pem failed %s", err.Error())
 		return nil, nil, err
 	}
 	return caCertFile, caKeyFile, nil
@@ -253,11 +253,11 @@ func createCaConfig() (*os.File, error) {
 	}
 	caConfigFile, err := ioutil.TempFile("", "ca-config.json")
 	if err != nil {
-		glog.Errorf("Create temp file for Ca Config failed %s", err.Error())
+		log.Errorf("Create temp file for Ca Config failed %s", err.Error())
 		return nil, err
 	}
 	if _, err := caConfigFile.WriteString(JsonWrapper(caConfig)); err != nil {
-		glog.Errorf("Write CA Config failed %s", err.Error())
+		log.Errorf("Write CA Config failed %s", err.Error())
 		return nil, err
 	}
 	return caConfigFile, nil
@@ -330,7 +330,7 @@ func genMutatingWebhookConfiguration(namespace string, caCert []byte, kubeClient
 	} else {
 		clusterId := namespace
 		clientConfig = admissionregistrationv1beta1.WebhookClientConfig{
-			URL:      StringPoint(fmt.Sprintf("https://%s.%s.svc.cluster.local:%d%s", WebhookName, clusterId, 443, Path)),
+			URL:      StringPoint(fmt.Sprintf("https://%s.%s.svc.cluster.local:%d%s", WebhookName, clusterId, 61679, Path)),
 			CABundle: caCert,
 		}
 	}

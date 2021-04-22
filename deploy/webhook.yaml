@@ -37,6 +37,6 @@ spec:
   selector:
     k8s-app: add-pod-eni-ip-limit-webhook
   ports:
-    - port: 443
-      targetPort: 443
+    - port: 61679
+      targetPort: 61679
       protocol: TCP

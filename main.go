@@ -3,15 +3,18 @@ package main
 import (
 	"crypto/tls"
 	"flag"
-	"github.com/cloudflare/cfssl/log"
+	log "github.com/cihub/seelog"
 	"github.com/qyzhaoxun/add-pod-eni-ip-limit-webhook/pkg/client"
 	wenhookconfig "github.com/qyzhaoxun/add-pod-eni-ip-limit-webhook/pkg/config"
 	"github.com/qyzhaoxun/add-pod-eni-ip-limit-webhook/pkg/https"
 	"github.com/qyzhaoxun/add-pod-eni-ip-limit-webhook/pkg/util"
+	"github.com/qyzhaoxun/add-pod-eni-ip-limit-webhook/pkg/util/logger"
 	"k8s.io/client-go/kubernetes"
 	"net/http"
+)
 
-	"github.com/golang/glog"
+const (
+	defaultLogFilePath = "/host/var/log/tke-route-eni/eni-webhook.log"
 )
 
 var (
@@ -22,7 +25,8 @@ var (
 func configTLS(config Config) *tls.Config {
 	sCert, err := tls.X509KeyPair([]byte(config.Cert), []byte(config.Key))
 	if err != nil {
-		glog.Fatal(err)
+		log.Error(err)
+		return nil
 	}
 	return &tls.Config{
 		Certificates: []tls.Certificate{sCert},
@@ -51,10 +55,11 @@ func init() {
 }
 
 func main() {
+	logger.SetupLogger(logger.GetLogFileLocation(defaultLogFilePath))
 	flag.VisitAll(func(i *flag.Flag) {
-		glog.V(2).Infof("FLAG: --%s=%q", i.Name, i.Value)
+		log.Debugf("FLAG: --%s=%q", i.Name, i.Value)
 	})
-	glog.V(2).Infof("Version: %+v", version)
+	log.Debugf("Version: %+v", version)
 
 	var defaultCNI string
 	var kubeClient kubernetes.Interface
@@ -62,31 +67,37 @@ func main() {
 
 	kubeClient, err = client.GetKubeClient(config.InCluster, config.Master, config.KubeConfig)
 	if err != nil {
-		glog.Fatalf("Failed to get kube client: %v", err)
+		log.Errorf("Failed to get kube client: %v", err)
+		return
 	}
 	defaultCNI, err = wenhookconfig.GetDefaultCNIFromMultus(kubeClient)
 	if err != nil {
-		glog.Fatalf("Failed to determine which is default cni: %s", err.Error())
+		log.Errorf("Failed to determine which is default cni: %s", err.Error())
+		return
 	}
 
-	glog.Infof("Default CNI is %s", defaultCNI)
+	log.Infof("Default CNI is %s", defaultCNI)
 
 	crtConfig, err := util.GenCrt(kubeClient, config.InCluster)
 	if err != nil {
-		log.Error("failed to generate crt and key: %s", err.Error())
+		log.Errorf("failed to generate crt and key: %s", err.Error())
 		return
 	}
 	if crtConfig == nil {
-		log.Error("failed to generate crt and key.")
+		log.Errorf("failed to generate crt and key.")
 		return
 	}
 	config.Cert = crtConfig.Cert
 	config.Key = crtConfig.Key
 	hs := https.NewHttpsServer(defaultCNI)
 	http.HandleFunc(util.Path, hs.ServeHttps)
+	tlsConfig := configTLS(config)
+	if tlsConfig == nil {
+		return
+	}
 	server := &http.Server{
-		Addr:      ":443",
-		TLSConfig: configTLS(config),
+		Addr:      ":61679",
+		TLSConfig: tlsConfig,
 	}
 	server.ListenAndServeTLS("", "")
 }

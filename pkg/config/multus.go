@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/golang/glog"
+	log "github.com/cihub/seelog"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
@@ -33,7 +33,7 @@ func GetDefaultCNIFromMultus(clienset kubernetes.Interface) (string, error) {
 			time.Sleep(1 * time.Minute)
 			cm, err = clienset.CoreV1().ConfigMaps(metav1.NamespaceSystem).Get(TKECNIConfCM, metav1.GetOptions{})
 			if err != nil {
-				glog.Warningf("Failed to get cm %s/%s", metav1.NamespaceSystem, TKECNIConfCM)
+				log.Warnf("Failed to get cm %s/%s", metav1.NamespaceSystem, TKECNIConfCM)
 				return false, err
 			}
 		}
@@ -54,7 +54,7 @@ func GetDefaultCNIFromMultus(clienset kubernetes.Interface) (string, error) {
 				defaultCNI = TKEBridge
 			} else {
 				defaultCNI = Other
-				glog.Warningf("No default cni included in cm.")
+				log.Warnf("No default cni included in cm.")
 			}
 			return true, nil
 		}
